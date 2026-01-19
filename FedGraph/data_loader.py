@@ -13,7 +13,6 @@ from torch_geometric.datasets import Planetoid
 from torch_geometric.datasets import CitationFull, Coauthor, LastFMAsia
 from torch_geometric.data import Data
 import networkx as nx
-import nxmetis
 from data_update import *
 
 ROOT = osp.dirname(__file__)  # 数据加载根路径
@@ -80,12 +79,28 @@ def load_partition_data(num_clients: int, data: Data, isImpaired=False):
         data: 数据集
         isImpaired: 是否考虑损失的link
     Returns:
-        nodes_list: ths list of nodes 
+        nodes_list: list of nodes per client
     """
-    # 将 PyG data 转换为 networkx graph
+    import pymetis
+    import networkx as nx
+    import numpy as np
+
+    # 将 PyG data 转换为 NetworkX 图
     G = nx.Graph()
     G.add_nodes_from([i for i in range(data.x.shape[0])])
     edges = np.array(data.edge_index.T, dtype=int)
     G.add_edges_from(edges)
-    x, nodes_list = nxmetis.partition(G, num_clients)
-    return x, nodes_list
+
+    # 转换为 adjacency list 给 pymetis
+    adjacency = [list(G.neighbors(n)) for n in range(len(G))]
+    
+    # 使用 pymetis 进行划分
+    n_cuts, parts = pymetis.part_graph(num_clients, adjacency=adjacency)
+
+    # parts 是节点所属分区列表，将节点按分区收集
+    nodes_list = [[] for _ in range(num_clients)]
+    for node_id, part_id in enumerate(parts):
+        nodes_list[part_id].append(node_id)
+
+    return nodes_list
+
